@@ -311,6 +311,10 @@ function drawPlayer(th){
   const glow=currentEffect?EFFECTS[currentEffect].color:th.accent2;
   ctx.shadowBlur=18;ctx.shadowColor=glow;ctx.fillStyle='#fff';ctx.fillRect(player.x,player.y,player.w,player.h);
   ctx.shadowBlur=0;ctx.fillStyle=glow;ctx.fillRect(player.x+4,player.y+7,player.w-8,8);ctx.fillStyle='#111';ctx.fillRect(player.x+7,player.y+22,5,5);ctx.fillRect(player.x+18,player.y+22,5,5);
+  if(multiplayer){
+    ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';
+    ctx.fillText(multiplayer.name,player.x+player.w/2,player.y-9);
+  }
   ctx.restore();
 }
 function drawRemotePlayers(th){
@@ -327,7 +331,7 @@ function drawRemotePlayers(th){
     ctx.fillStyle='#fff';
     ctx.font='bold 11px Arial';
     ctx.textAlign='center';
-    ctx.fillText('OUTRO JOGADOR',remote.x+player.w/2,remote.y-9);
+    ctx.fillText(remote.name||'Jogador',remote.x+player.w/2,remote.y-9);
     ctx.restore();
   }
 }
@@ -351,8 +355,10 @@ const menu=document.getElementById('menu');
 const editor=document.getElementById('editor');
 const pauseCard=document.getElementById('pauseCard');
 const seedInput=document.getElementById('seedInput');
+const playerNameInput=document.getElementById('playerNameInput');
 let seedLabel=seedFromUrl || 'NEON-RIFT';
 seedInput.value=seedLabel;
+playerNameInput.value=localStorage.getItem('neonPlayerName')||'';
 
 function formatTime(seconds){ const m=Math.floor(seconds/60); const s=seconds%60; return `${String(m).padStart(2,'0')}:${s.toFixed(2).padStart(5,'0')}`; }
 function updateRecords(){
@@ -464,6 +470,9 @@ async function enterMultiplayerRoom(create){
     const {db,user}=await getFirebaseUser();
     if(!user) throw new Error('Não foi possível autenticar no Firebase.');
     const seed=seedInput.value.trim()||'NEON-RIFT';
+    const playerName=playerNameInput.value.trim().slice(0,20)||'Jogador';
+    playerNameInput.value=playerName;
+    localStorage.setItem('neonPlayerName',playerName);
     let code=create?createRoomCode():roomCodeInput.value.trim().toUpperCase();
     if(!create&&!roomCodePattern.test(code)) throw new Error('Digite um código de sala com 6 letras ou números.');
 
@@ -487,7 +496,7 @@ async function enterMultiplayerRoom(create){
 
     const playerRef=roomRef.child(`players/${user.uid}`);
     const playersRef=roomRef.child('players');
-    const state={db,user,code,seed:roomSeed,roomRef,playerRef,playersRef,lastSent:0};
+    const state={db,user,code,seed:roomSeed,name:playerName,roomRef,playerRef,playersRef,lastSent:0};
     multiplayer=state;
     remotePlayers.clear();
     remotePlayersListener=snapshot=>{
@@ -500,7 +509,7 @@ async function enterMultiplayerRoom(create){
     await playerRef.onDisconnect().remove();
     seedInput.value=roomSeed;
     roomCodeInput.value=code;
-    await playerRef.set({x:90,y:500,roomIndex:0,color:'#62efff'});
+    await playerRef.set({x:90,y:500,roomIndex:0,name:playerName,color:'#62efff'});
     startGame(false);
     setMultiplayerStatus(`Conectado à sala ${code}. Compartilhe o código com seus amigos.`);
     showOnlineControls(code);
@@ -539,6 +548,7 @@ function sendMultiplayerState(now){
 document.getElementById('createRoomBtn').onclick=()=>enterMultiplayerRoom(true);
 document.getElementById('joinRoomBtn').onclick=()=>enterMultiplayerRoom(false);
 roomCodeInput.addEventListener('input',()=>{roomCodeInput.value=roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);});
+playerNameInput.addEventListener('input',()=>{playerNameInput.value=playerNameInput.value.slice(0,20);});
 document.getElementById('onlineCopyRoom').onclick=async()=>{
   try{ await navigator.clipboard.writeText(multiplayer.code); setMultiplayerStatus(`Código ${multiplayer.code} copiado.`); }
   catch(error){ setMultiplayerStatus(`Não foi possível copiar o código: ${error.message}`); }
