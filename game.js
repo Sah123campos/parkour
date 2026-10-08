@@ -29,6 +29,15 @@ const THEMES = [
   { name:'ESPAÇO', sky:'#03040e', mid:'#0b1030', ground:'#171b45', accent:'#b27cff', accent2:'#58a6ff', particle:'#d5c2ff' }
 ];
 
+const MUSIC_TRACKS = [
+  { bpm:82, root:45, scale:[0,3,5,7,10], melody:[0,-1,2,-1,3,-1,2,1,0,-1,2,4,3,-1,1,-1], wave:'triangle' },
+  { bpm:96, root:52, scale:[0,2,4,7,9], melody:[0,2,-1,4,2,-1,1,2,4,-1,3,2,1,-1,2,-1], wave:'sine' },
+  { bpm:112, root:48, scale:[0,3,5,7,10], melody:[0,-1,3,5,-1,4,3,-1,0,3,7,-1,5,4,3,-1], wave:'sawtooth' },
+  { bpm:104, root:43, scale:[0,2,3,7,8], melody:[0,2,3,-1,4,3,2,-1,0,3,4,3,-1,2,0,-1], wave:'triangle' },
+  { bpm:76, root:55, scale:[0,2,4,7,11], melody:[0,-1,2,4,-1,3,2,-1,0,2,4,2,-1,1,0,-1], wave:'sine' },
+  { bpm:88, root:43, scale:[0,2,5,7,9], melody:[0,-1,2,4,3,-1,2,0,4,-1,3,2,0,-1,2,-1], wave:'sine' }
+];
+
 const EFFECTS = {
   lowGravity: { name:'BAIXA GRAVIDADE', color:'#69d7ff', icon:'🚀' },
   inverted: { name:'GRAVIDADE INVERTIDA', color:'#ff63d6', icon:'🔄' },
@@ -46,6 +55,7 @@ addEventListener('keydown', e => {
   if(!keys.has(e.code)) justPressed.add(e.code);
   keys.add(e.code);
   if(e.code==='KeyP' && gameStarted){ paused=!paused; updatePauseCard(); }
+  if(e.code==='KeyM' && gameStarted) toggleMusic();
   if(e.code==='KeyR' && gameStarted) resetRoom();
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -61,6 +71,8 @@ let roomIndex=0, room=null, rng=null, particles=[], cameraX=0, totalTime=0, room
 let activeEffects=[], currentEffect=null, effectFlash=0, shake=0, lastTime=performance.now();
 let gameStarted=false, speedrunMode=false, speedrunStart=0, customMode=false;
 let audioCtx=null, masterGain=null;
+let musicGain=null, musicTimer=null, currentMusicTrack=-1, musicStep=0, nextMusicStepAt=0;
+let musicEnabled=localStorage.getItem('neonMusicEnabled')!=='false';
 let customRoomData=null;
 let multiplayer=null, remotePlayers=new Map();
 
@@ -75,32 +87,14 @@ function makeRoom(index) {
   const switches=[];
   const blink=[];
 
-  // Base route: always solvable, with increasing vertical variation.
-  let x=0, y=600;
-  platforms.push({x:-100,y:640,w:430,h:80,type:'solid'});
-  for(let i=0;i<11;i++) {
-    x += r.int(135,220);
-    y = Math.max(300, Math.min(600, y + r.int(-120,120)));
-    const w = r.int(120,210);
-    platforms.push({x,y,w,h:28,type:'solid'});
-    if(i%3===1 && index>0) blink.push({x:x+w+35,y:y+r.int(-100,40),w:r.int(90,150),h:22,on:2000,off:1000,phase:r.int(0,2999)});
-    if(i%2===0 && index>1) hazards.push({type:'spike',x:x+w+r.int(10,45),y:y-22,w:28,h:22,phase:r.next()*Math.PI*2});
-  }
-  platforms.push({x:width-360,y:560,w:430,h:160,type:'exit'});
+  buildRoute(platforms,hazards,blink,r,width,index);
 
   const effectKeys = ['lowGravity','superJump','speed','dash','inverted','slow','magnet'];
   const count = Math.min(3, 1 + Math.floor(index/2));
-  const used=[];
-  for(let i=0;i<count;i++) {
-    let fx = r.range(430,width-500);
-    let nearest = platforms.reduce((best,p)=>Math.abs(p.x+p.w/2-fx)<Math.abs(best.x+best.w/2-fx)?p:best, platforms[0]);
-    let effect = r.pick(effectKeys.filter(k=>!used.includes(k)));
-    used.push(effect);
-    zones.push({x:fx,y:nearest.y-145,w:170,h:145,effect,phase:r.range(0,Math.PI*2)});
-  }
+  zones.push(...makeEffectZones(platforms,r,count,effectKeys));
 
-  if(index>=1) switches.push({x:r.range(850,width-700),y:330,w:34,h:34,activeUntil:0});
-  if(index>=2) switches.push({x:r.range(1450,width-500),y:280,w:34,h:34,activeUntil:0});
+  if(index>=1) switches.push(makeSwitch(platforms,r,850,width-700));
+  if(index>=2) switches.push(makeSwitch(platforms,r,1450,width-500));
   if(index>=2) hazards.push({type:'laser',x:r.range(700,width-500),y:r.range(280,500),w:12,h:230,phase:r.next()*Math.PI*2});
 
   return {index,theme,difficulty,width,platforms,hazards,zones,switches,blink,exitX:width-260,stars:Array.from({length:90},()=>({x:r.range(0,width),y:r.range(20,600),s:r.range(.5,2.2),a:r.range(.2,.9)}))};
@@ -126,11 +120,12 @@ function nextRoom() {
     if(!oldBest || finalTime<oldBest) localStorage.setItem('neonBestSpeed', finalTime.toFixed(3));
     speedrunMode=false;
     gameStarted=false;
+    stopMusic();
     menu.classList.add('active');
     updateRecords();
     alert(`Speedrun concluído! 10 salas em ${formatTime(finalTime)}.`);
     return;
-  } room=makeRoom(roomIndex); roomTime=0; particles=[]; player.x=90; player.y=500; player.spawnX=90; player.spawnY=500; player.vx=0; player.vy=0; cameraX=0; currentEffect=null; burst(player.x,player.y,room.theme.accent2,35,5); }
+  } room=makeRoom(roomIndex); roomTime=0; particles=[]; player.x=90; player.y=500; player.spawnX=90; player.spawnY=500; player.vx=0; player.vy=0; cameraX=0; currentEffect=null; setMusicTheme(room.theme); burst(player.x,player.y,room.theme.accent2,35,5); }
 function burst(x,y,color,n=10,speed=2) { for(let i=0;i<n;i++){ const a=Math.random()*Math.PI*2, s=Math.random()*speed+.5; particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:Math.random()*3+1,life:1,color}); } }
 function dust(x,y,color){ for(let i=0;i<3;i++) particles.push({x:x+(Math.random()-.5)*18,y,vx:(Math.random()-.5)*1.2,vy:-Math.random()*1.8,r:Math.random()*2+1,life:.55,color}); }
 
@@ -143,6 +138,97 @@ function getEffectAtPlayer() {
     if(player.x+player.w/2>z.x && player.x<z.x+z.w && player.y+player.h/2>z.y && player.y<z.y+z.h) return z.effect;
   }
   return null;
+}
+
+function buildRoute(platforms,hazards,blink,r,width,index){
+  const exitX=width-360;
+  const startX=330;
+  const startY=600;
+  const exitY=560;
+  const routeCount=Math.max(8,Math.round((exitX-startX-70)/230));
+  const routeWidths=Array.from({length:routeCount},()=>r.int(155,165));
+  const gapTotal=exitX-startX-routeWidths.reduce((sum,value)=>sum+value,0);
+  const gaps=Array(routeCount+1).fill(gapTotal/(routeCount+1));
+
+  for(let i=0;i<32;i++){
+    const from=r.int(0,gaps.length-1);
+    let to=r.int(0,gaps.length-1);
+    if(to===from) to=(to+1)%gaps.length;
+    const shift=r.int(-8,8);
+    if(gaps[from]+shift>=55&&gaps[from]+shift<=85&&gaps[to]-shift>=55&&gaps[to]-shift<=85){
+      gaps[from]+=shift;
+      gaps[to]-=shift;
+    }
+  }
+
+  platforms.push({x:-100,y:640,w:430,h:80,type:'solid'});
+  const route=[];
+  let x=startX,y=startY;
+  for(let i=0;i<routeCount;i++){
+    x+=gaps[i];
+    const previousY=y;
+    y+=r.pick([-30,-15,0,15,30]);
+    if(y<500) y=500+(500-y);
+    if(y>600) y=600-(y-600);
+    if(i===routeCount-1){
+      y=Math.max(Math.max(500,previousY-30,exitY-45),Math.min(Math.min(600,previousY+30,exitY+45),y));
+    }
+    const w=routeWidths[i];
+    route.push({x:Math.round(x),y,w,h:28,type:'solid'});
+    x+=w;
+  }
+  platforms.push(...route);
+  platforms.push({x:exitX,y:exitY,w:430,h:160,type:'exit'});
+
+  for(let i=0;i<route.length;i++){
+    const platform=route[i];
+    if(index>1&&i%3===1){
+      hazards.push({type:'spike',x:platform.x+r.int(65,100),y:platform.y-22,w:28,h:22,phase:r.next()*Math.PI*2});
+    }
+    if(index>0&&i%3===1){
+      const next=route[i+1]||platforms[platforms.length-1];
+      blink.push({
+        x:platform.x+platform.w,
+        y:Math.round((platform.y+next.y)/2)-8,
+        w:Math.max(1,next.x-(platform.x+platform.w)),
+        h:16,on:2000,off:1000,phase:r.int(0,2999)
+      });
+    }
+  }
+}
+
+function makeEffectZones(platforms,r,count,effectKeys=Object.keys(EFFECTS)){
+  const candidates=platforms.slice(1,-1);
+  for(let i=candidates.length-1;i>0;i--){
+    const j=r.int(0,i);
+    [candidates[i],candidates[j]]=[candidates[j],candidates[i]];
+  }
+  const availableEffects=[...effectKeys];
+  return Array.from({length:Math.min(count,candidates.length)},(_,i)=>{
+    const platform=candidates[i];
+    const effectIndex=r.int(0,availableEffects.length-1);
+    const [effect]=availableEffects.splice(effectIndex,1);
+    const width=220,height=145;
+    return {
+      x:platform.x+platform.w/2-width/2,
+      y:platform.y-115,
+      w:width,h:height,effect,phase:r.range(0,Math.PI*2)
+    };
+  });
+}
+function makeSwitch(platforms,r,minX,maxX){
+  const candidates=platforms.slice(1,-1).filter(p=>p.x+p.w>=minX&&p.x<=maxX);
+  const platform=candidates.length?r.pick(candidates):platforms[1];
+  return {
+    x:platform.x+platform.w/2-17,
+    y:platform.y-72,
+    w:34,h:34,activeUntil:0
+  };
+}
+function isNearSwitch(s){
+  const dx=player.x+player.w/2-(s.x+s.w/2);
+  const dy=player.y+player.h/2-(s.y+s.h/2);
+  return Math.hypot(dx,dy)<82;
 }
 
 function update(dt) {
@@ -188,7 +274,15 @@ function update(dt) {
 
   if(player.dashCooldown>0) player.dashCooldown-=tdt;
   if(player.dashTimer>0){ player.dashTimer-=tdt; player.vx*=.99; }
-  if(pressed('ShiftLeft','ShiftRight','KeyK') && player.dashCooldown<=0){ player.dashTimer=.18; sfx('dash'); player.dashCooldown=.8; player.vx=(dir||1)*950; player.vy*=.25; burst(player.x,player.y+player.h/2,EFFECTS.dash.color,18,4); }
+  if(pressed('ShiftLeft','ShiftRight','KeyK') && player.dashCooldown<=0){
+    const empowered=currentEffect==='dash';
+    player.dashTimer=empowered?.32:.18;
+    sfx('dash');
+    player.dashCooldown=empowered?.45:.8;
+    player.vx=(dir||1)*(empowered?1450:950);
+    player.vy=empowered?Math.min(player.vy,-120):player.vy*.25;
+    burst(player.x,player.y+player.h/2,empowered?EFFECTS.dash.color:room.theme.accent2,empowered?28:18,empowered?5:4);
+  }
 
   if(currentEffect==='magnet'){
     const near=room.platforms.filter(p=>Math.abs((p.x+p.w/2)-(player.x+player.w/2))<180 && Math.abs((p.y+p.h/2)-(player.y+player.h/2))<260)[0];
@@ -229,9 +323,12 @@ function update(dt) {
   }
 
   // Blink platforms are visual/physical cycle 2s on, 1s off.
-  // Switches temporarily enable nearby blink platforms.
+  // Press E near a switch to temporarily enable nearby blink platforms.
   for(const s of room.switches){
-    if(rectsOverlap(player,s)){ s.activeUntil=roomTime+4; burst(s.x+s.w/2,s.y+s.h/2,room.theme.accent2,16,3); }
+    if(isNearSwitch(s)&&pressed('KeyE')){
+      s.activeUntil=roomTime+5;
+      burst(s.x+s.w/2,s.y+s.h/2,room.theme.accent2,16,3);
+    }
   }
 
   if(player.y>H+250 || player.y<-250) die();
@@ -248,7 +345,9 @@ function update(dt) {
 }
 
 function isBlinkOn(b){
-  const cycle=b.on+b.off; return ((roomTime*1000+b.phase)%cycle)<b.on;
+  const cycle=b.on+b.off;
+  return room.switches.some(s=>roomTime<s.activeUntil&&Math.abs((b.x+b.w/2)-(s.x+s.w/2))<520&&Math.abs((b.y+b.h/2)-(s.y+s.h/2))<260)
+    || ((roomTime*1000+b.phase)%cycle)<b.on;
 }
 
 function draw() {
@@ -303,7 +402,19 @@ function drawWorld(th){
     } else if(h.type==='spike'){ctx.fillStyle='#ff435f';ctx.beginPath();ctx.moveTo(h.x,h.y+h.h);ctx.lineTo(h.x+h.w/2,h.y);ctx.lineTo(h.x+h.w,h.y+h.h);ctx.closePath();ctx.fill();}
     else {const on=Math.sin(roomTime*2.2+h.phase)>-.25;ctx.globalAlpha=on?.85:.12;ctx.fillStyle='#ff315d';ctx.fillRect(h.x,h.y,h.w,h.h);ctx.globalAlpha=1;}
   }
-  for(const s of room.switches){ctx.fillStyle=roomTime<s.activeUntil?'#5cff9a':th.accent;ctx.fillRect(s.x,s.y,s.w,s.h);ctx.fillStyle='#101018';ctx.fillRect(s.x+8,s.y+8,18,18);ctx.fillStyle='#fff';ctx.font='12px Arial';ctx.fillText('E',s.x+10,s.y+21);}
+  for(const s of room.switches){
+    const near=isNearSwitch(s), active=roomTime<s.activeUntil;
+    ctx.fillStyle=active?'#5cff9a':th.accent;
+    ctx.fillRect(s.x,s.y,s.w,s.h);
+    ctx.fillStyle='#101018';ctx.fillRect(s.x+8,s.y+8,18,18);
+    ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='center';
+    ctx.fillText('E',s.x+s.w/2,s.y+22);
+    if(near){
+      ctx.fillStyle=active?'#5cff9a':'#fff';
+      ctx.font='bold 12px Arial';
+      ctx.fillText(active?'ATIVADO':'E • ATIVAR',s.x+s.w/2,s.y-9);
+    }
+  }
   for(const p of particles){ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;
 }
 function drawPlayer(th){
@@ -341,7 +452,7 @@ function drawUI(th){
   ctx.font='13px Arial';ctx.fillStyle='rgba(255,255,255,.7)';ctx.fillText(`Ambiente: ${th.name}   •   Mortes: ${player.deaths}`,34,66);
   ctx.fillText(`Tempo da sala: ${roomTime.toFixed(1)}s   •   Seed: ${seedLabel}`,34,88);
   if(speedrunMode){ ctx.fillStyle='#ffe45e'; ctx.fillText(`SPEEDRUN: ${formatTime(totalTime)} • META: 10 SALAS`,34,105); }
-  if(currentEffect){const e=EFFECTS[currentEffect];ctx.fillStyle=e.color;ctx.fillRect(W-340,18,320,64);ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText(`${e.icon} ${e.name}`,W-320,46);ctx.font='12px Arial';ctx.fillText('Efeito de física ativo',W-320,67);}
+  if(currentEffect){const e=EFFECTS[currentEffect];ctx.fillStyle=e.color;ctx.fillRect(W-340,18,320,64);ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText(`${e.icon} ${e.name}`,W-320,46);ctx.font='12px Arial';ctx.fillText(currentEffect==='dash'?'Shift/K: impulso reforçado':'Efeito de física ativo',W-320,67);}
   else {ctx.fillStyle='rgba(255,255,255,.65)';ctx.font='13px Arial';ctx.fillText('Entre nas zonas coloridas para alterar a física',W-340,42);}
   const progress=Math.max(0,Math.min(1,player.x/room.exitX));ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(W/2-190,H-32,380,8);ctx.fillStyle=th.accent2;ctx.fillRect(W/2-190,H-32,380*progress,8);
 }
@@ -356,6 +467,7 @@ const editor=document.getElementById('editor');
 const pauseCard=document.getElementById('pauseCard');
 const seedInput=document.getElementById('seedInput');
 const playerNameInput=document.getElementById('playerNameInput');
+const musicToggle=document.getElementById('musicToggle');
 let seedLabel=seedFromUrl || 'NEON-RIFT';
 seedInput.value=seedLabel;
 playerNameInput.value=localStorage.getItem('neonPlayerName')||'';
@@ -366,7 +478,7 @@ function updateRecords(){
   const best=Number(localStorage.getItem('neonBestSpeed')||0);
   document.getElementById('bestSpeed').textContent=best?formatTime(best):'--:--.--';
 }
-function showMenu(){ gameStarted=false; paused=false; menu.classList.add('active'); editor.classList.remove('active'); pauseCard.classList.add('hidden'); updateRecords(); }
+function showMenu(){ gameStarted=false; paused=false; stopMusic(); menu.classList.add('active'); editor.classList.remove('active'); pauseCard.classList.add('hidden'); updateMusicState(); updateRecords(); }
 function startGame(isSpeedrun=false){
   seedLabel=(seedInput.value.trim() || 'NEON-RIFT');
   window.location.hash='';
@@ -406,13 +518,11 @@ function deterministicRoom(index){
 // Replace room generation with an equivalent generator that supports arbitrary seeds.
 function buildProceduralRoom(index,r){
   const theme=THEMES[index%THEMES.length], difficulty=1+index*.14, width=2600+Math.min(900,index*80);
-  const platforms=[{x:-100,y:640,w:430,h:80,type:'solid'}], hazards=[], zones=[], switches=[], blink=[];
-  let x=0,y=600;
-  for(let i=0;i<11;i++){ x+=r.int(135,220); y=Math.max(300,Math.min(600,y+r.int(-120,120))); const w=r.int(120,210); platforms.push({x,y,w,h:28,type:'solid'}); if(i%3===1&&index>0) blink.push({x:x+w+35,y:y+r.int(-100,40),w:r.int(90,150),h:22,on:2000,off:1000,phase:r.int(0,2999)}); if(i%2===0&&index>1) hazards.push({type:'spike',x:x+w+r.int(10,45),y:y-22,w:28,h:22,phase:r.next()*Math.PI*2}); }
-  platforms.push({x:width-360,y:560,w:430,h:160,type:'exit'});
-  const effectKeys=Object.keys(EFFECTS), count=Math.min(4,1+Math.floor(index/2)), used=[];
-  for(let i=0;i<count;i++){ let fx=r.range(430,width-500); let nearest=platforms.reduce((best,p)=>Math.abs(p.x+p.w/2-fx)<Math.abs(best.x+best.w/2-fx)?p:best,platforms[0]); let effect=r.pick(effectKeys.filter(k=>!used.includes(k))); used.push(effect); zones.push({x:fx,y:nearest.y-145,w:170,h:145,effect,phase:r.range(0,Math.PI*2)}); }
-  if(index>=1) switches.push({x:r.range(850,width-700),y:330,w:34,h:34,activeUntil:0}); if(index>=2) switches.push({x:r.range(1450,width-500),y:280,w:34,h:34,activeUntil:0});
+  const platforms=[], hazards=[], zones=[], switches=[], blink=[];
+  buildRoute(platforms,hazards,blink,r,width,index);
+  const effectKeys=Object.keys(EFFECTS), count=Math.min(4,1+Math.floor(index/2));
+  zones.push(...makeEffectZones(platforms,r,count,effectKeys));
+  if(index>=1) switches.push(makeSwitch(platforms,r,850,width-700)); if(index>=2) switches.push(makeSwitch(platforms,r,1450,width-500));
   if(index>=2) hazards.push({type:'laser',x:r.range(700,width-500),y:r.range(280,500),w:12,h:230,phase:r.next()*Math.PI*2});
   if(index>=3){ for(let i=0;i<Math.min(3,index-1);i++) hazards.push({type:'moving',x:r.range(700,width-450),y:r.range(260,520),w:26,h:90,phase:r.range(0,6.28),range:r.int(70,150)}); }
   return {index,theme,difficulty,width,platforms,hazards,zones,switches,blink,exitX:width-260,stars:Array.from({length:90},()=>({x:r.range(0,width),y:r.range(20,600),s:r.range(.5,2.2),a:r.range(.2,.9)}))};
@@ -421,13 +531,98 @@ function cloneRoom(r){ return JSON.parse(JSON.stringify(r)); }
 
 // Use the seed-aware generator whenever a new room starts.
 function getGeneratedRoom(index){ return customMode&&customRoomData?cloneRoom(customRoomData):deterministicRoom(index); }
-function resetRoomEnhanced(){ room=getGeneratedRoom(roomIndex); roomTime=0; particles=[]; cameraX=0; player.x=player.spawnX=90; player.y=player.spawnY=500; player.vx=0; player.vy=0; player.dashTimer=0; player.dashCooldown=0; currentEffect=null; effectFlash=0; }
+function resetRoomEnhanced(){ room=getGeneratedRoom(roomIndex); roomTime=0; particles=[]; cameraX=0; player.x=player.spawnX=90; player.y=player.spawnY=500; player.vx=0; player.vy=0; player.dashTimer=0; player.dashCooldown=0; currentEffect=null; effectFlash=0; setMusicTheme(room.theme); }
 resetRoom=resetRoomEnhanced;
 
-function initAudio(){ if(audioCtx) return; audioCtx=new (window.AudioContext||window.webkitAudioContext)(); masterGain=audioCtx.createGain(); masterGain.gain.value=.055; masterGain.connect(audioCtx.destination); }
+function initAudio(){
+  if(!audioCtx){
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    masterGain=audioCtx.createGain();
+    masterGain.gain.value=.055;
+    masterGain.connect(audioCtx.destination);
+    musicGain=audioCtx.createGain();
+    musicGain.gain.value=0;
+    musicGain.connect(audioCtx.destination);
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume().catch(error=>console.error('Não foi possível iniciar o áudio:',error));
+}
+function midiFrequency(note){ return 440*Math.pow(2,(note-69)/12); }
+function playMusicTone(note,start,duration,wave,volume){
+  const oscillator=audioCtx.createOscillator(), gain=audioCtx.createGain();
+  oscillator.type=wave;
+  oscillator.frequency.setValueAtTime(midiFrequency(note),start);
+  gain.gain.setValueAtTime(.0001,start);
+  gain.gain.exponentialRampToValueAtTime(volume,start+.025);
+  gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+  oscillator.connect(gain);
+  gain.connect(musicGain);
+  oscillator.start(start);
+  oscillator.stop(start+duration+.03);
+}
+function scheduleMusic(){
+  if(!audioCtx||currentMusicTrack<0) return;
+  const track=MUSIC_TRACKS[currentMusicTrack];
+  const stepDuration=60/track.bpm/2;
+  const horizon=audioCtx.currentTime+.12;
+  while(nextMusicStepAt<horizon){
+    const step=musicStep%track.melody.length;
+    const degree=track.melody[step];
+    if(musicEnabled&&gameStarted&&!paused){
+      if(degree>=0){
+        const octave=step%8===4?24:12;
+        playMusicTone(track.root+track.scale[degree%track.scale.length]+octave,nextMusicStepAt,stepDuration*.78,track.wave,.045);
+      }
+      if(step%4===0){
+        const bassOctave=step%8===0?-12:-5;
+        playMusicTone(track.root+bassOctave,nextMusicStepAt,stepDuration*1.65,'triangle',.055);
+      }
+      if(step===0||step===8){
+        playMusicTone(track.root+track.scale[2]+12,nextMusicStepAt,stepDuration*3.5,'sine',.018);
+      }
+    }
+    musicStep++;
+    nextMusicStepAt+=stepDuration;
+  }
+}
+function updateMusicState(){
+  musicToggle.classList.toggle('hidden',!gameStarted);
+  musicToggle.textContent=musicEnabled?'♫ Música: ligada':'♫ Música: desligada';
+  musicToggle.setAttribute('aria-pressed',String(musicEnabled));
+  if(musicGain&&audioCtx){
+    const volume=musicEnabled&&gameStarted&&!paused?.72:0;
+    musicGain.gain.setTargetAtTime(volume,audioCtx.currentTime,.12);
+  }
+}
+function setMusicTheme(theme){
+  if(!audioCtx) return;
+  const trackIndex=THEMES.findIndex(item=>item.name===theme.name);
+  if(trackIndex<0) return;
+  if(currentMusicTrack===trackIndex&&musicTimer) return;
+  currentMusicTrack=trackIndex;
+  musicStep=0;
+  const start=audioCtx.currentTime+.16;
+  nextMusicStepAt=start;
+  musicGain.gain.cancelScheduledValues(audioCtx.currentTime);
+  musicGain.gain.setTargetAtTime(0,audioCtx.currentTime,.04);
+  musicGain.gain.setTargetAtTime(musicEnabled&&gameStarted&&!paused?.72:0,start,.12);
+  if(!musicTimer) musicTimer=setInterval(scheduleMusic,40);
+}
+function stopMusic(){
+  if(musicTimer){ clearInterval(musicTimer); musicTimer=null; }
+  currentMusicTrack=-1;
+  if(musicGain&&audioCtx){
+    musicGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    musicGain.gain.setTargetAtTime(0,audioCtx.currentTime,.08);
+  }
+}
+function toggleMusic(){
+  musicEnabled=!musicEnabled;
+  localStorage.setItem('neonMusicEnabled',String(musicEnabled));
+  updateMusicState();
+}
 function sfx(type){ if(!audioCtx||!masterGain) return; const now=audioCtx.currentTime; const osc=audioCtx.createOscillator(), gain=audioCtx.createGain(); const data={jump:[420,.08,'triangle'],dash:[90,.14,'sawtooth'],zone:[620,.12,'sine'],death:[110,.3,'square'],room:[740,.2,'triangle']}; const d=data[type]||data.jump; osc.type=d[2]; osc.frequency.setValueAtTime(d[0],now); if(type==='dash') osc.frequency.exponentialRampToValueAtTime(380,now+d[1]); if(type==='room') osc.frequency.exponentialRampToValueAtTime(1200,now+d[1]); gain.gain.setValueAtTime(.001,now); gain.gain.exponentialRampToValueAtTime(.6,now+.01); gain.gain.exponentialRampToValueAtTime(.001,now+d[1]); osc.connect(gain); gain.connect(masterGain); osc.start(now); osc.stop(now+d[1]+.02); }
 
-function updatePauseCard(){ pauseCard.classList.toggle('hidden',!gameStarted||!paused); }
+function updatePauseCard(){ pauseCard.classList.toggle('hidden',!gameStarted||!paused); updateMusicState(); }
 function finishCustomRoom(){ customMode=false; showMenu(); alert('Sala customizada concluída!'); }
 
 const roomCodeInput=document.getElementById('roomCodeInput');
@@ -503,7 +698,10 @@ async function enterMultiplayerRoom(create){
       const players=snapshot.val()||{};
       remotePlayers=new Map(Object.entries(players)
         .filter(([id,value])=>id!==user.uid&&value&&Number.isFinite(value.x)&&Number.isFinite(value.y)&&Number.isFinite(value.roomIndex))
-        .map(([id,value])=>[id,value]));
+        .map(([id,value])=>[id,{
+          ...value,
+          name:typeof value.name==='string'&&value.name.trim()?value.name.trim().slice(0,20):'Jogador'
+        }]));
     };
     playersRef.on('value',remotePlayersListener,error=>setMultiplayerStatus(`Erro de sincronização: ${error.message}`));
     await playerRef.onDisconnect().remove();
@@ -541,7 +739,7 @@ async function leaveMultiplayerRoom(returnToMenu=true){
 function sendMultiplayerState(now){
   if(multiplayer.sendFailed||now-multiplayer.lastSent<100) return;
   multiplayer.lastSent=now;
-  multiplayer.playerRef.update({x:player.x,y:player.y,roomIndex}).catch(error=>{
+  multiplayer.playerRef.update({x:player.x,y:player.y,roomIndex,name:multiplayer.name}).catch(error=>{
     if(multiplayer){ multiplayer.sendFailed=true; setMultiplayerStatus(`Erro ao enviar posição: ${error.message}`); }
   });
 }
@@ -554,6 +752,7 @@ document.getElementById('onlineCopyRoom').onclick=async()=>{
   catch(error){ setMultiplayerStatus(`Não foi possível copiar o código: ${error.message}`); }
 };
 document.getElementById('onlineLeaveRoom').onclick=()=>leaveMultiplayerRoom(true);
+musicToggle.onclick=toggleMusic;
 document.getElementById('playBtn').onclick=()=>startGame(false);
 document.getElementById('speedrunBtn').onclick=()=>startGame(true);
 document.getElementById('randomSeed').onclick=()=>{ seedInput.value=Math.random().toString(36).slice(2,10).toUpperCase(); };
@@ -568,7 +767,7 @@ ec.addEventListener('click',e=>{const r=ec.getBoundingClientRect(); const x=Math
 document.getElementById('editorBtn').onclick=()=>{menu.classList.remove('active');editor.classList.add('active');drawEditor();};
 document.getElementById('backMenu').onclick=showMenu;
 document.getElementById('clearEditor').onclick=()=>{editorItems=[];drawEditor();};
-document.getElementById('playCustom').onclick=()=>{ customRoomData={index:0,theme:THEMES[2],difficulty:1,width:900,exitX:760,platforms:[],hazards:[],zones:[],switches:[],blink:[],stars:Array.from({length:60},(_,i)=>({x:(i*73)%900,y:(i*47)%300,s:1,a:.5}))}; editorItems.forEach(i=>{if(i.type==='platform')customRoomData.platforms.push({x:i.x,y:i.y+30,w:50,h:30,type:'solid'}); if(i.type==='spike')customRoomData.hazards.push({type:'spike',x:i.x,y:i.y+8,w:50,h:32,phase:0}); if(i.type==='zone')customRoomData.zones.push({x:i.x,y:i.y-70,w:50,h:100,effect:'superJump',phase:0}); if(i.type==='blink')customRoomData.blink.push({x:i.x,y:i.y,w:50,h:22,on:2000,off:1000,phase:0});}); customRoomData.platforms.push({x:0,y:350,w:150,h:30,type:'solid'},{x:800,y:350,w:100,h:30,type:'exit'}); customMode=true; roomIndex=0; player.deaths=0; seedLabel='CUSTOM'; totalTime=0; speedrunMode=false; gameStarted=true; editor.classList.remove('active'); initAudio(); resetRoom(); };
+document.getElementById('playCustom').onclick=()=>{ customRoomData={index:0,theme:THEMES[2],difficulty:1,width:900,exitX:760,platforms:[],hazards:[],zones:[],switches:[],blink:[],stars:Array.from({length:60},(_,i)=>({x:(i*73)%900,y:(i*47)%300,s:1,a:.5}))}; editorItems.forEach(i=>{if(i.type==='platform')customRoomData.platforms.push({x:i.x,y:i.y+30,w:50,h:30,type:'solid'}); if(i.type==='spike')customRoomData.hazards.push({type:'spike',x:i.x,y:i.y+8,w:50,h:32,phase:0}); if(i.type==='zone')customRoomData.zones.push({x:i.x,y:i.y-70,w:50,h:100,effect:'superJump',phase:0}); if(i.type==='blink')customRoomData.blink.push({x:i.x,y:i.y,w:50,h:22,on:2000,off:1000,phase:0});}); customRoomData.platforms.push({x:0,y:350,w:150,h:30,type:'solid'},{x:800,y:350,w:100,h:30,type:'exit'}); customMode=true; roomIndex=0; player.deaths=0; seedLabel='CUSTOM'; totalTime=0; speedrunMode=false; gameStarted=true; editor.classList.remove('active'); initAudio(); updateMusicState(); resetRoom(); };
 
 updateRecords();
 if(seedFromUrl){ seedInput.value=seedFromUrl; startGame(false); }

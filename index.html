@@ -45,7 +45,7 @@
           <div>Melhor sala: <b id="bestRoom">0</b></div>
           <div>Melhor speedrun: <b id="bestSpeed">--:--.--</b></div>
         </div>
-        <small>WASD/Setas • Espaço pular • Shift/K dash • P pausa • R reinicia</small>
+        <small>WASD/Setas • Espaço pular • Shift/K dash • E ativar interruptores • P pausa • R reinicia</small>
       </div>
     </section>
 
@@ -76,7 +76,8 @@
       <button id="onlineCopyRoom">Copiar código</button>
       <button id="onlineLeaveRoom">Sair da sala</button>
     </div>
-    <div class="help">A/D ou ←/→ mover • Espaço/W/↑ pular • Shift/K dash • R reiniciar • P pausar</div>
+    <button id="musicToggle" class="music-toggle hidden" type="button" aria-pressed="true">♫ Música: ligada</button>
+    <div class="help">A/D ou ←/→ mover • Espaço/W/↑ pular • Shift/K dash • E ativar • M música • R reiniciar • P pausar</div>
   </main>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>

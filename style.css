@@ -38,5 +38,6 @@ small { color: rgba(255,255,255,.5); }
 .online-controls { position: fixed; top: 12px; right: 12px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid rgba(98,239,255,.3); border-radius: 10px; background: rgba(8,8,22,.9); }
 .online-controls span { color: #62efff; font-size: 12px; font-weight: 800; }
 .online-controls button { padding: 7px 10px; font-size: 12px; }
+.music-toggle { position: fixed; right: 12px; bottom: 34px; z-index: 5; padding: 8px 12px; font-size: 12px; background: rgba(8,8,22,.88); }
 .hidden { display: none; }
 @media (max-width: 650px) { .panel { padding: 24px; } .menu-buttons { grid-template-columns: 1fr; } .menu-buttons .primary { grid-column: auto; } .records { gap: 10px; flex-direction: column; } }

@@ -8,21 +8,26 @@ Abra `index.html` em um navegador moderno.
 - A/D ou setas: mover
 - Espaço/W/↑: pular
 - Shift/K: dash
+- E: ativar interruptores próximos e ligar plataformas blink próximas por 5 segundos
 - R: reiniciar a sala
 - P: pausar
+- M: ligar/desligar a música
 
 ## Versão expandida
 - Menu inicial com seed personalizada.
 - Seed compartilhável e geração determinística.
 - 6 ambientes: caverna, floresta, cidade neon, vulcão, gelo e espaço.
+- Plataformas alinhadas entre o início e a saída, com espaços e desníveis de salto limitados.
 - 7 zonas de física: baixa gravidade, gravidade invertida, super pulo, velocidade, câmera lenta, magnetismo e dash.
 - Coyote time, jump buffer, pulo variável, wall slide e wall jump.
-- Plataformas blink em ciclo 2s ligado / 1s desligado.
+- Plataformas blink em ciclo 2s ligado / 1s desligado; interruptores próximos podem mantê-las ligadas por 5 segundos.
+- Zonas de efeito posicionadas sobre plataformas alcançáveis; a zona de impulso reforça o dash com Shift/K.
 - Espinhos, lasers, blocos móveis e botões.
 - Dificuldade progressiva e salas infinitas.
 - Checkpoint automático: morrer reinicia a sala atual.
 - Partículas, parallax, efeitos visuais das zonas e HUD.
 - Áudio sintetizado para pulo, dash, zonas, morte e mudança de sala.
+- Trilhas originais sintetizadas que mudam com o ambiente e podem ser desligadas com M.
 - Modo Speedrun com objetivo de 10 salas e recorde salvo no navegador.
 - Recorde da maior sala alcançada salvo em localStorage.
 - Editor simples de salas com plataforma, espinho, zona, blink e borracha.
