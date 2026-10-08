@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon Rift Parkour 2D</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="game-shell">
+    <canvas id="game" width="1280" height="720"></canvas>
+
+    <section id="menu" class="overlay active">
+      <div class="panel">
+        <div class="eyebrow">PARKOUR PROCEDURAL 2D</div>
+        <h1>NEON <span>RIFT</span></h1>
+        <p class="subtitle">Atravesse dimensões, domine a física e tente bater seu recorde.</p>
+        <label>Seed da aventura</label>
+        <div class="row">
+          <input id="seedInput" maxlength="32" placeholder="ex.: SENAI2026" />
+          <button id="randomSeed">Aleatória</button>
+        </div>  
+        <div class="menu-buttons">
+          <button id="playBtn" class="primary">JOGAR</button>
+          <button id="speedrunBtn">SPEEDRUN</button>
+          <button id="editorBtn">EDITOR DE SALA</button>
+        </div>
+        <div class="records">
+          <div>Melhor sala: <b id="bestRoom">0</b></div>
+          <div>Melhor speedrun: <b id="bestSpeed">--:--.--</b></div>
+        </div>
+        <small>WASD/Setas • Espaço pular • Shift/K dash • P pausa • R reinicia</small>
+      </div>
+    </section>
+
+    <section id="editor" class="overlay">
+      <div class="panel editor-panel">
+        <div class="eyebrow">EDITOR SIMPLES</div>
+        <h2>Monte sua sala</h2>
+        <p>Clique no grid para alternar blocos. Use o botão abaixo para adicionar elementos.</p>
+        <div class="editor-toolbar">
+          <button data-tool="platform" class="tool active">Plataforma</button>
+          <button data-tool="spike" class="tool">Espinho</button>
+          <button data-tool="zone" class="tool">Zona</button>
+          <button data-tool="blink" class="tool">Blink</button>
+          <button data-tool="erase" class="tool">Apagar</button>
+        </div>
+        <canvas id="editorCanvas" width="900" height="430"></canvas>
+        <div class="row">
+          <button id="clearEditor">Limpar</button>
+          <button id="playCustom" class="primary">JOGAR SALA</button>
+          <button id="backMenu">Voltar</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="pauseCard" class="pause-card hidden">PAUSADO<br><small>P para continuar</small></div>
+    <div class="help">A/D ou ←/→ mover • Espaço/W/↑ pular • Shift/K dash • R reiniciar • P pausar</div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
