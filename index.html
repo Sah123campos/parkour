@@ -21,6 +21,17 @@
           <input id="seedInput" maxlength="32" placeholder="ex.: SENAI2026" />
           <button id="randomSeed">Aleatória</button>
         </div>  
+        <div class="multiplayer">
+          <div class="eyebrow">MULTIPLAYER ONLINE</div>
+          <div class="row">
+            <input id="roomCodeInput" maxlength="6" placeholder="Código da sala" aria-label="Código da sala" />
+            <button id="joinRoomBtn">Entrar</button>
+          </div>
+          <div class="row">
+            <button id="createRoomBtn">Criar sala</button>
+          </div>
+          <small id="multiplayerStatus" role="status" aria-live="polite">Configure o Firebase para jogar online.</small>
+        </div>
         <div class="menu-buttons">
           <button id="playBtn" class="primary">JOGAR</button>
           <button id="speedrunBtn">SPEEDRUN</button>
@@ -56,8 +67,17 @@
     </section>
 
     <div id="pauseCard" class="pause-card hidden">PAUSADO<br><small>P para continuar</small></div>
+    <div id="onlineControls" class="online-controls hidden">
+      <span id="onlineRoomLabel"></span>
+      <button id="onlineCopyRoom">Copiar código</button>
+      <button id="onlineLeaveRoom">Sair da sala</button>
+    </div>
     <div class="help">A/D ou ←/→ mover • Espaço/W/↑ pular • Shift/K dash • R reiniciar • P pausar</div>
   </main>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

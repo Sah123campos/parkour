@@ -62,6 +62,7 @@ let activeEffects=[], currentEffect=null, effectFlash=0, shake=0, lastTime=perfo
 let gameStarted=false, speedrunMode=false, speedrunStart=0, customMode=false;
 let audioCtx=null, masterGain=null;
 let customRoomData=null;
+let multiplayer=null, remotePlayers=new Map();
 
 function makeRoom(index) {
   const r = new RNG((baseSeed ^ Math.imul(index+1, 0x9e3779b9)) >>> 0);
@@ -266,6 +267,7 @@ function draw() {
 
   const sx=(Math.random()-.5)*shake, sy=(Math.random()-.5)*shake; ctx.save();ctx.translate(-cameraX+sx,sy);
   drawWorld(th);
+  drawRemotePlayers(th);
   drawPlayer(th);
   ctx.restore();
 
@@ -311,6 +313,24 @@ function drawPlayer(th){
   ctx.shadowBlur=0;ctx.fillStyle=glow;ctx.fillRect(player.x+4,player.y+7,player.w-8,8);ctx.fillStyle='#111';ctx.fillRect(player.x+7,player.y+22,5,5);ctx.fillRect(player.x+18,player.y+22,5,5);
   ctx.restore();
 }
+function drawRemotePlayers(th){
+  if(!multiplayer) return;
+  for(const remote of remotePlayers.values()){
+    if(remote.roomIndex!==roomIndex) continue;
+    ctx.save();
+    ctx.globalAlpha=.72;
+    ctx.shadowBlur=16;
+    ctx.shadowColor=th.accent2;
+    ctx.fillStyle=th.accent2;
+    ctx.fillRect(remote.x,remote.y,player.w,player.h);
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#fff';
+    ctx.font='bold 11px Arial';
+    ctx.textAlign='center';
+    ctx.fillText('OUTRO JOGADOR',remote.x+player.w/2,remote.y-9);
+    ctx.restore();
+  }
+}
 function drawUI(th){
   ctx.fillStyle='rgba(5,5,15,.72)';ctx.fillRect(18,16,430,92);
   ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText(`NEON RIFT • SALA ${roomIndex+1}`,34,43);
@@ -322,7 +342,7 @@ function drawUI(th){
   const progress=Math.max(0,Math.min(1,player.x/room.exitX));ctx.fillStyle='rgba(255,255,255,.14)';ctx.fillRect(W/2-190,H-32,380,8);ctx.fillStyle=th.accent2;ctx.fillRect(W/2-190,H-32,380*progress,8);
 }
 
-function loop(now){ const dt=Math.min(.033,(now-lastTime)/1000);lastTime=now; if(gameStarted) update(dt); if(room) draw(); justPressed.clear(); requestAnimationFrame(loop); }
+function loop(now){ const dt=Math.min(.033,(now-lastTime)/1000);lastTime=now; if(gameStarted) update(dt); if(multiplayer) sendMultiplayerState(now); if(room) draw(); justPressed.clear(); requestAnimationFrame(loop); }
 
 // ============================================================
 // Menu, speedrun, áudio e editor
@@ -404,9 +424,130 @@ function sfx(type){ if(!audioCtx||!masterGain) return; const now=audioCtx.curren
 function updatePauseCard(){ pauseCard.classList.toggle('hidden',!gameStarted||!paused); }
 function finishCustomRoom(){ customMode=false; showMenu(); alert('Sala customizada concluída!'); }
 
+const roomCodeInput=document.getElementById('roomCodeInput');
+const multiplayerStatus=document.getElementById('multiplayerStatus');
+const createRoomBtn=document.getElementById('createRoomBtn');
+const joinRoomBtn=document.getElementById('joinRoomBtn');
+const onlineControls=document.getElementById('onlineControls');
+const onlineRoomLabel=document.getElementById('onlineRoomLabel');
+const roomCodePattern=/^[A-Z0-9]{6}$/;
+let remotePlayersListener=null;
+
+function setMultiplayerStatus(message){ multiplayerStatus.textContent=message; }
+function createRoomCode(){
+  const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({length:6},()=>alphabet[Math.floor(Math.random()*alphabet.length)]).join('');
+}
+function isFirebaseConfigured(){
+  const config=window.firebaseConfig;
+  return config && config.apiKey && !config.apiKey.startsWith('YOUR_') &&
+    config.projectId && !config.projectId.startsWith('YOUR_') &&
+    config.databaseURL && !config.databaseURL.includes('YOUR_');
+}
+async function getFirebaseUser(){
+  if(!isFirebaseConfigured()) throw new Error('Configure firebase-config.js seguindo os passos do README.md.');
+  if(!firebase.apps.length) firebase.initializeApp(window.firebaseConfig);
+  const auth=firebase.auth();
+  const credential=auth.currentUser?null:await auth.signInAnonymously();
+  return {db:firebase.database(),user:auth.currentUser||(credential&&credential.user)};
+}
+function showOnlineControls(code){
+  onlineRoomLabel.textContent=`SALA ${code}`;
+  onlineControls.classList.remove('hidden');
+}
+async function enterMultiplayerRoom(create){
+  createRoomBtn.disabled=true;
+  joinRoomBtn.disabled=true;
+  setMultiplayerStatus('Conectando ao Firebase...');
+  try{
+    if(multiplayer) await leaveMultiplayerRoom(false);
+    const {db,user}=await getFirebaseUser();
+    if(!user) throw new Error('Não foi possível autenticar no Firebase.');
+    const seed=seedInput.value.trim()||'NEON-RIFT';
+    let code=create?createRoomCode():roomCodeInput.value.trim().toUpperCase();
+    if(!create&&!roomCodePattern.test(code)) throw new Error('Digite um código de sala com 6 letras ou números.');
+
+    let roomRef=db.ref(`rooms/${code}`);
+    let roomSeed;
+    if(create){
+      let created=false;
+      for(let attempt=0;attempt<5;attempt++){
+        const result=await roomRef.child('seed').transaction(current=>current===null?seed:undefined);
+        if(result.committed){ created=true; break; }
+        code=createRoomCode();
+        roomRef=db.ref(`rooms/${code}`);
+      }
+      if(!created) throw new Error('Não foi possível reservar um código de sala. Tente novamente.');
+      roomSeed=seed;
+    }else{
+      const seedSnapshot=await roomRef.child('seed').once('value');
+      roomSeed=seedSnapshot.val();
+      if(typeof roomSeed!=='string'||!roomSeed) throw new Error('Sala não encontrada. Confira o código.');
+    }
+
+    const playerRef=roomRef.child(`players/${user.uid}`);
+    const playersRef=roomRef.child('players');
+    const state={db,user,code,seed:roomSeed,roomRef,playerRef,playersRef,lastSent:0};
+    multiplayer=state;
+    remotePlayers.clear();
+    remotePlayersListener=snapshot=>{
+      const players=snapshot.val()||{};
+      remotePlayers=new Map(Object.entries(players)
+        .filter(([id,value])=>id!==user.uid&&value&&Number.isFinite(value.x)&&Number.isFinite(value.y)&&Number.isFinite(value.roomIndex))
+        .map(([id,value])=>[id,value]));
+    };
+    playersRef.on('value',remotePlayersListener,error=>setMultiplayerStatus(`Erro de sincronização: ${error.message}`));
+    await playerRef.onDisconnect().remove();
+    seedInput.value=roomSeed;
+    roomCodeInput.value=code;
+    await playerRef.set({x:90,y:500,roomIndex:0,color:'#62efff'});
+    startGame(false);
+    setMultiplayerStatus(`Conectado à sala ${code}. Compartilhe o código com seus amigos.`);
+    showOnlineControls(code);
+  }catch(error){
+    if(multiplayer) await leaveMultiplayerRoom(false);
+    gameStarted=false;
+    menu.classList.add('active');
+    onlineControls.classList.add('hidden');
+    setMultiplayerStatus(error.message||'Falha ao conectar ao multiplayer.');
+    createRoomBtn.disabled=false;
+    joinRoomBtn.disabled=false;
+  }
+}
+async function leaveMultiplayerRoom(returnToMenu=true){
+  const state=multiplayer;
+  multiplayer=null;
+  remotePlayers.clear();
+  if(state){
+    state.playersRef.off('value',remotePlayersListener);
+    try{ await state.playerRef.remove(); }
+    catch(error){ setMultiplayerStatus(`Não foi possível sair da sala: ${error.message}`); }
+  }
+  onlineControls.classList.add('hidden');
+  createRoomBtn.disabled=false;
+  joinRoomBtn.disabled=false;
+  if(returnToMenu) showMenu();
+  else setMultiplayerStatus('Saiu da sala anterior.');
+}
+function sendMultiplayerState(now){
+  if(multiplayer.sendFailed||now-multiplayer.lastSent<100) return;
+  multiplayer.lastSent=now;
+  multiplayer.playerRef.update({x:player.x,y:player.y,roomIndex}).catch(error=>{
+    if(multiplayer){ multiplayer.sendFailed=true; setMultiplayerStatus(`Erro ao enviar posição: ${error.message}`); }
+  });
+}
+document.getElementById('createRoomBtn').onclick=()=>enterMultiplayerRoom(true);
+document.getElementById('joinRoomBtn').onclick=()=>enterMultiplayerRoom(false);
+roomCodeInput.addEventListener('input',()=>{roomCodeInput.value=roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);});
+document.getElementById('onlineCopyRoom').onclick=async()=>{
+  try{ await navigator.clipboard.writeText(multiplayer.code); setMultiplayerStatus(`Código ${multiplayer.code} copiado.`); }
+  catch(error){ setMultiplayerStatus(`Não foi possível copiar o código: ${error.message}`); }
+};
+document.getElementById('onlineLeaveRoom').onclick=()=>leaveMultiplayerRoom(true);
 document.getElementById('playBtn').onclick=()=>startGame(false);
 document.getElementById('speedrunBtn').onclick=()=>startGame(true);
 document.getElementById('randomSeed').onclick=()=>{ seedInput.value=Math.random().toString(36).slice(2,10).toUpperCase(); };
+setMultiplayerStatus(isFirebaseConfigured()?'Crie uma sala ou entre com um código.':'Configure o Firebase para jogar online.');
 
 // Editor
 const ec=document.getElementById('editorCanvas'), ex=ec.getContext('2d'); let editorTool='platform';
